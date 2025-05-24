@@ -7,31 +7,99 @@ const feedback = ref('');
 const isLoading = ref(false);
 const errorMessage = ref('');
 
-async function scoreImpression() {
-  if (!impressionText.value.trim()) {
-    errorMessage.value = '感想文を入力してください。';
-    return;
-  }
+// App.vue の <script setup> 内
+// ... (他のimport文)
+// import { GoogleGenerativeAI } from "@google/generative-ai"; // npm install @google/generative-ai
 
+// ... (他のref)
+// const API_KEY = "YOUR_GEMINI_API_KEY"; // ここに実際のAPIキーを設定 (非推奨)
+
+async function scoreImpression() {
+  // ... (入力チェックなど)
   isLoading.value = true;
-  errorMessage.value = '';
-  score.value = null;
-  feedback.value = '';
+  // ...
+
+  // GoogleGenerativeAI のインスタンスを作成 (APIキーを環境変数などから読み込むのが望ましい)
+  // const genAI = new GoogleGenerativeAI(import.meta.env.VITE_GEMINI_API_KEY);
+  // .env ファイルに VITE_GEMINI_API_KEY="YOUR_API_KEY" を記述し、
+  // npm install @google/generative-ai を実行してください。
+
+  // ★★★ 重要: APIキーの取り扱い ★★★
+  // フロントエンドにAPIキーを直接記述するのはセキュリティリスクがあります。
+  // 小規模なテストや学習目的以外では、バックエンド経由での呼び出しを検討してください。
+  // ここではデモのため、直接記述する形に近い方法を示しますが、
+  // Viteの環境変数 (import.meta.env.VITE_GEMINI_API_KEY) の利用を推奨します。
+  // .env ファイルを作成し、 VITE_GEMINI_API_KEY=あなたのAPIキー を記述してください。
+
+  const apiKeyFromEnv = import.meta.env.VITE_GEMINI_API_KEY;
+  if (!apiKeyFromEnv) {
+      errorMessage.value = 'APIキーが設定されていません。';
+      isLoading.value = false;
+      return;
+  }
+  const genAI = new GoogleGenerativeAI(apiKeyFromEnv);
 
   try {
-    // --- ここにGemini API呼び出し処理を実装 ---
-    // ダミーの採点ロジック (API連携前にテスト用)
-    await new Promise(resolve => setTimeout(resolve, 1500)); // 擬似的なAPI遅延
-    const dummyScore = Math.floor(Math.random() * 101);
-    const dummyFeedback = "素晴らしい感想文です！改善点としては、もう少し具体的なエピソードを加えるとより良くなるでしょう。";
+    const model = genAI.getGenerativeModel({ model: "gemini-pro" }); // または適切なモデル
 
-    score.value = dummyScore;
-    feedback.value = dummyFeedback;
-    // --- Gemini APIからのレスポンスで上記を更新 ---
+    const prompt = `
+      以下の感想文を評価し、採点してください。
+      評価基準は以下の通りです。
+      - 表現力 (0-30点)
+      - 内容の深さ (0-40点)
+      - 独自性 (0-30点)
+      合計100点満点で採点し、具体的なフィードバックも提供してください。
+
+      出力形式は以下のJSON形式でお願いします。
+      {
+        "score": <合計点数>,
+        "feedback": "<具体的なフィードバック>"
+      }
+
+      感想文:
+      ${impressionText.value}
+    `;
+
+    const result = await model.generateContent(prompt);
+    const response = await result.response;
+    const text = response.text();
+
+    console.log("Gemini API Response:", text); // デバッグ用
+
+    // JSON形式のレスポンスをパース
+    // APIからの出力が常に期待通りとは限らないため、エラーハンドリングをしっかり行う
+    let parsedResponse;
+    try {
+        // APIのレスポンスが ```json ... ``` のようにマークダウンで囲まれている場合を考慮
+        const jsonMatch = text.match(/```json\s*([\s\S]*?)\s*```/);
+        if (jsonMatch && jsonMatch[1]) {
+            parsedResponse = JSON.parse(jsonMatch[1]);
+        } else {
+            // そのままJSONとしてパースしてみる
+            parsedResponse = JSON.parse(text);
+        }
+    } catch (e) {
+        console.error("Failed to parse Gemini API response:", e);
+        errorMessage.value = "APIからの応答の解析に失敗しました。形式が正しくない可能性があります。";
+        isLoading.value = false;
+        return;
+    }
+
+
+    if (parsedResponse && typeof parsedResponse.score === 'number' && typeof parsedResponse.feedback === 'string') {
+      score.value = parsedResponse.score;
+      feedback.value = parsedResponse.feedback;
+    } else {
+      throw new Error("Invalid response format from API");
+    }
 
   } catch (error) {
-    console.error("Error scoring impression:", error);
-    errorMessage.value = '採点中にエラーが発生しました。もう一度お試しください。';
+    console.error("Error scoring impression with Gemini API:", error);
+    errorMessage.value = 'Gemini APIとの通信中にエラーが発生しました。';
+    // エラーオブジェクトに詳細が含まれている場合、それを表示することも検討
+    if (error.message) {
+        errorMessage.value += ` (${error.message})`;
+    }
   } finally {
     isLoading.value = false;
   }
